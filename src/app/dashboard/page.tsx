@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -14,15 +15,31 @@ import {
 } from "recharts";
 import { ChartConfig, ChartContainer } from "@/components/ui/chart";
 import {
-  patients,
-  symptomsData,
-  visitHistoryData,
-  diseaseProgressionData,
-  visitFrequencyData,
-  riskPredictions,
-  activeCases,
-  recentVisits,
-} from "@/lib/data";
+  Patient,
+  Visit,
+  PatternDetected,
+  Disease,
+  Symptom,
+} from "@/lib/services/types";
+import { patientService } from "@/lib/services/patientService";
+import { medicalService } from "@/lib/services/medicalService";
+import { patternService } from "@/lib/services/patternService";
+
+interface VisitFrequencyData {
+  month: string;
+  visits: number;
+}
+
+interface DiseaseProgressionData {
+  date: string;
+  severity: string;
+}
+
+interface PatientHistory {
+  visits: Visit[];
+  diseases: Disease[];
+  symptoms: Symptom[];
+}
 
 const chartConfig = {
   visits: {
@@ -33,264 +50,292 @@ const chartConfig = {
     label: "Severity",
     color: "#dc2626",
   },
+  symptoms: {
+    label: "Symptoms",
+    color: "#047857",
+  },
 } satisfies ChartConfig;
 
 export default function DashboardPage() {
-  const totalPatients = patients.length;
-  const activeCasesCount = activeCases.length;
-  const averageSeverity = Math.round(
-    ((patients.reduce((acc, patient) => {
-      const severityMap = { Mild: 1, Moderate: 2, Severe: 3 };
-      return acc + severityMap[patient.severity as keyof typeof severityMap];
-    }, 0) /
-      patients.length) *
-      100) /
-      3
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+  const [patientHistory, setPatientHistory] = useState<PatientHistory | null>(
+    null
+  );
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const patientsData = await patientService.getAllPatients();
+
+        // Fetch additional data for each patient
+        const patientsWithData = await Promise.all(
+          patientsData.map(async (patient) => {
+            const [visits, patterns] = await Promise.all([
+              patientService.getPatientVisits(patient.id),
+              patternService.getPatternsByPatientId(patient.id),
+            ]);
+
+            return {
+              ...patient,
+              visits: visits || [],
+              patterns: patterns || [],
+            };
+          })
+        );
+
+        setPatients(patientsWithData);
+        if (patientsWithData.length > 0) {
+          setSelectedPatient(patientsWithData[0]);
+          fetchPatientHistory(patientsWithData[0].id);
+        }
+      } catch (err) {
+        setError("Failed to fetch data");
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  const fetchPatientHistory = async (patientId: number) => {
+    try {
+      const history = await patientService.getPatientMedicalHistory(patientId);
+      setPatientHistory(history);
+    } catch (err) {
+      console.error("Error fetching patient history:", err);
+    }
+  };
+
+  const filteredPatients = patients.filter(
+    (patient) =>
+      patient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (patient.condition || "")
+        .toLowerCase()
+        .includes(searchQuery.toLowerCase())
   );
 
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center h-screen">
+        Loading...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex justify-center items-center h-screen text-red-500">
+        {error}
+      </div>
+    );
+  }
+
+  // Calculate visit frequency data
+  const visitFrequencyData: VisitFrequencyData[] =
+    selectedPatient?.visits?.reduce((acc: VisitFrequencyData[], visit) => {
+      const month = new Date(visit.visit_date).toLocaleDateString("en-US", {
+        month: "short",
+      });
+      const existing = acc.find((item) => item.month === month);
+      if (existing) {
+        existing.visits += 1;
+      } else {
+        acc.push({ month, visits: 1 });
+      }
+      return acc;
+    }, []) || [];
+
+  // Calculate disease progression data
+  const diseaseProgressionData: DiseaseProgressionData[] =
+    patientHistory?.visits?.map((visit) => ({
+      date: new Date(visit.visit_date).toLocaleDateString("en-US", {
+        month: "short",
+      }),
+      severity: visit.severity_level,
+    })) || [];
+
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold">
-          Digital Patient Record & Analysis
-        </h1>
-        <div className="flex gap-4">
-          <button className="px-4 py-2 bg-primary text-primary-foreground rounded-md">
-            Add New Patient
-          </button>
-          <button className="px-4 py-2 border rounded-md">
-            Generate Report
-          </button>
+    <div className="flex h-screen overflow-hidden">
+      {/* Left Panel - Patient List */}
+      <div className="w-1/4 p-4 border-r overflow-y-auto">
+        <div className="mb-4">
+          <input
+            type="text"
+            placeholder="Search patients..."
+            className="w-full p-2 border rounded"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+        <div className="space-y-2">
+          {filteredPatients.map((patient) => (
+            <div
+              key={patient.id}
+              className={`p-4 border rounded cursor-pointer ${
+                selectedPatient?.id === patient.id ? "bg-blue-50" : ""
+              }`}
+              onClick={() => {
+                setSelectedPatient(patient);
+                fetchPatientHistory(patient.id);
+              }}
+            >
+              <h3 className="font-semibold">{patient.name}</h3>
+              <p className="text-sm text-gray-600">
+                {patient.condition} - {patient.severity}
+              </p>
+              <p className="text-xs text-gray-500">
+                Last Visit: {new Date(patient.lastVisit).toLocaleDateString()}
+              </p>
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Total Patients
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{totalPatients}</div>
-            <p className="text-xs text-muted-foreground">
-              +{Math.floor(totalPatients * 0.12)}% from last month
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Cases</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{activeCasesCount}</div>
-            <p className="text-xs text-muted-foreground">
-              +{Math.floor(activeCasesCount * 0.25)} new cases today
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Average Severity
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{averageSeverity}%</div>
-            <Progress value={averageSeverity} className="mt-2" />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Risk Prediction
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-red-500">
-              {Math.round(
-                riskPredictions.reduce((acc, pred) => acc + pred.risk, 0) /
-                  riskPredictions.length
-              )}
-              %
+      {/* Main Content */}
+      <div className="flex-1 p-6 overflow-y-auto">
+        {selectedPatient && (
+          <>
+            {/* Patient Overview */}
+            <div className="mb-6">
+              <h1 className="text-2xl font-bold mb-4">Patient Overview</h1>
+              <div className="grid grid-cols-4 gap-4">
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-sm text-gray-500">Name</div>
+                    <div className="font-medium">{selectedPatient.name}</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-sm text-gray-500">Age</div>
+                    <div className="font-medium">
+                      {new Date().getFullYear() -
+                        new Date(selectedPatient.dob).getFullYear()}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-sm text-gray-500">Condition</div>
+                    <div className="font-medium">
+                      {selectedPatient.condition}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-sm text-gray-500">Severity</div>
+                    <div className="font-medium">
+                      {selectedPatient.severity}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Average risk across patients
-            </p>
-          </CardContent>
-        </Card>
-      </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Patient Visit History</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ChartContainer
-              config={chartConfig}
-              className="min-h-[300px] w-full"
-            >
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={visitHistoryData}>
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip />
-                  <Bar dataKey="visits" fill="var(--color-visits)" radius={4} />
-                  <Bar
-                    dataKey="severity"
-                    fill="var(--color-severity)"
-                    radius={4}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            </ChartContainer>
-          </CardContent>
-        </Card>
+            {/* Medical History */}
+            <div className="mb-6">
+              <h2 className="text-xl font-bold mb-4">Medical History</h2>
+              <div className="grid grid-cols-2 gap-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Visit History</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {selectedPatient.visits.map((visit) => (
+                        <div key={visit.id} className="border-b pb-2">
+                          <div className="font-medium">
+                            {new Date(visit.visit_date).toLocaleDateString()}
+                          </div>
+                          <div className="text-sm text-gray-600">
+                            Diagnosis: {visit.diagnosis}
+                          </div>
+                          <div className="text-sm text-gray-600">
+                            Prescription: {visit.prescription}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Disease Progression</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ChartContainer
-              config={chartConfig}
-              className="min-h-[300px] w-full"
-            >
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={diseaseProgressionData}>
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip />
-                  <Line
-                    type="monotone"
-                    dataKey="severity"
-                    stroke="var(--color-severity)"
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </ChartContainer>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Symptoms Analysis</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {symptomsData.map((symptom) => (
-                <div
-                  key={symptom.symptom}
-                  className="flex items-center justify-between"
-                >
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded-full bg-primary" />
-                    <span>{symptom.symptom}</span>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <span className="text-sm text-muted-foreground">
-                      Frequency: {symptom.frequency}
-                    </span>
-                    <span className="text-sm text-muted-foreground">
-                      Severity: {symptom.severity}/5
-                    </span>
-                  </div>
-                </div>
-              ))}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Disease Progression</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ChartContainer config={chartConfig} className="h-[300px]">
+                      <ResponsiveContainer width="100%" height={300}>
+                        <LineChart data={diseaseProgressionData}>
+                          <XAxis dataKey="date" />
+                          <YAxis />
+                          <Tooltip />
+                          <Line
+                            type="monotone"
+                            dataKey="severity"
+                            stroke="var(--color-severity)"
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </ChartContainer>
+                  </CardContent>
+                </Card>
+              </div>
             </div>
-          </CardContent>
-        </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Visit Frequency</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ChartContainer
-              config={chartConfig}
-              className="min-h-[300px] w-full"
-            >
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={visitFrequencyData}>
-                  <XAxis dataKey="month" />
-                  <YAxis />
-                  <Tooltip />
-                  <Bar dataKey="visits" fill="var(--color-visits)" radius={4} />
-                </BarChart>
-              </ResponsiveContainer>
-            </ChartContainer>
-          </CardContent>
-        </Card>
-      </div>
+            {/* Risk Analysis */}
+            <div className="mb-6">
+              <h2 className="text-xl font-bold mb-4">Risk Analysis</h2>
+              <div className="grid grid-cols-2 gap-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Pattern Detection</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {selectedPatient.patterns?.map((pattern) => (
+                      <div key={pattern.id} className="mb-4">
+                        <div className="font-medium">
+                          {pattern.pattern_description}
+                        </div>
+                        <div className="text-sm text-gray-600">
+                          Risk Level: {pattern.risk_level}
+                        </div>
+                        <div className="text-sm text-gray-600">
+                          Recommendation: {pattern.recommendation}
+                        </div>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Recent Visits</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {recentVisits.map((visit) => (
-                <div
-                  key={`${visit.patientId}-${visit.date}`}
-                  className="flex items-center justify-between"
-                >
-                  <div>
-                    <p className="font-medium">{visit.patientName}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {visit.reason}
-                    </p>
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    {new Date(visit.date).toLocaleDateString()}
-                  </div>
-                </div>
-              ))}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Visit Frequency</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ChartContainer config={chartConfig} className="h-[300px]">
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={visitFrequencyData}>
+                          <XAxis dataKey="month" />
+                          <YAxis />
+                          <Tooltip />
+                          <Bar dataKey="visits" fill="var(--color-visits)" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </ChartContainer>
+                  </CardContent>
+                </Card>
+              </div>
             </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Risk Predictions</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {riskPredictions.map((prediction) => (
-                <div
-                  key={prediction.patientId}
-                  className="flex items-center justify-between"
-                >
-                  <div>
-                    <p className="font-medium">
-                      {
-                        patients.find((p) => p.id === prediction.patientId)
-                          ?.name
-                      }
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      {prediction.condition}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-medium text-red-500">
-                      {prediction.risk}%
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {prediction.factors.join(", ")}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+          </>
+        )}
       </div>
     </div>
   );
