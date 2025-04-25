@@ -1,11 +1,45 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { patients } from "@/lib/data";
+import { Button } from "@/components/ui/button";
 import { Patient } from "@/lib/types";
+import { localStorageService } from "@/lib/services/localStorageService";
+import { useRouter } from "next/navigation";
 
 export default function PatientsPage() {
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const router = useRouter();
+
+  useEffect(() => {
+    localStorageService.initializeDefaultData();
+    const storedPatients = localStorageService.getPatients();
+    setPatients(storedPatients);
+  }, []);
+
+  const handleAddPatient = () => {
+    router.push("/patients/new");
+  };
+
+  const handleViewPatient = (patientId: number) => {
+    router.push(`/patients/${patientId}`);
+  };
+
+  const handleDeletePatient = (patientId: number) => {
+    if (confirm("Are you sure you want to delete this patient?")) {
+      localStorageService.deletePatient(patientId);
+      setPatients(localStorageService.getPatients());
+    }
+  };
+
+  const filteredPatients = patients.filter(
+    (patient) =>
+      patient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      patient.condition.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -15,15 +49,15 @@ export default function PatientsPage() {
             type="search"
             placeholder="Search patients..."
             className="w-[300px]"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
           />
-          <button className="px-4 py-2 bg-primary text-primary-foreground rounded-md">
-            Add New Patient
-          </button>
+          <Button onClick={handleAddPatient}>Add New Patient</Button>
         </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {patients.map((patient: Patient) => (
+        {filteredPatients.map((patient) => (
           <Card key={patient.id}>
             <CardHeader>
               <CardTitle className="flex items-center justify-between">
@@ -112,6 +146,22 @@ export default function PatientsPage() {
                       </span>
                     ))}
                   </div>
+                </div>
+                <div className="pt-4 flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleViewPatient(patient.id)}
+                  >
+                    View Details
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => handleDeletePatient(patient.id)}
+                  >
+                    Delete
+                  </Button>
                 </div>
               </div>
             </CardContent>
