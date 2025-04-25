@@ -23,6 +23,7 @@ import {
   activeCases,
   recentVisits,
 } from "@/lib/data";
+import { SeverityLevel } from "@/lib/types";
 
 const chartConfig = {
   visits: {
@@ -35,13 +36,18 @@ const chartConfig = {
   },
 } satisfies ChartConfig;
 
+const severityMap: Record<SeverityLevel, number> = {
+  Mild: 1,
+  Moderate: 2,
+  Severe: 3,
+};
+
 export default function DashboardPage() {
   const totalPatients = patients.length;
   const activeCasesCount = activeCases.length;
   const averageSeverity = Math.round(
     ((patients.reduce((acc, patient) => {
-      const severityMap = { Mild: 1, Moderate: 2, Severe: 3 };
-      return acc + severityMap[patient.severity as keyof typeof severityMap];
+      return acc + severityMap[patient.severity];
     }, 0) /
       patients.length) *
       100) /

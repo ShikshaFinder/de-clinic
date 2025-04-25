@@ -3,6 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { patients } from "@/lib/data";
+import { Patient } from "@/lib/types";
 
 export default function PatientsPage() {
   return (
@@ -22,7 +23,7 @@ export default function PatientsPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {patients.map((patient) => (
+        {patients.map((patient: Patient) => (
           <Card key={patient.id}>
             <CardHeader>
               <CardTitle className="flex items-center justify-between">
@@ -72,16 +73,20 @@ export default function PatientsPage() {
                   </span>
                   <span>{patient.condition}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">BMI</span>
-                  <span>{patient.bmi}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">
-                    Blood Pressure
-                  </span>
-                  <span>{patient.bloodPressure}</span>
-                </div>
+                {patient.bmi && (
+                  <div className="flex justify-between">
+                    <span className="text-sm text-muted-foreground">BMI</span>
+                    <span>{patient.bmi}</span>
+                  </div>
+                )}
+                {patient.bloodPressure && (
+                  <div className="flex justify-between">
+                    <span className="text-sm text-muted-foreground">
+                      Blood Pressure
+                    </span>
+                    <span>{patient.bloodPressure}</span>
+                  </div>
+                )}
                 <div className="pt-4">
                   <h4 className="text-sm font-medium mb-2">Allergies</h4>
                   <div className="flex flex-wrap gap-2">
